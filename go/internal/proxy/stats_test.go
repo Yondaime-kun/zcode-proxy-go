@@ -163,5 +163,8 @@ func TestStatsPersistence(t *testing.T) {
 	if snap3.TotalRequests != 0 || snap3.TotalTokens != 0 {
 		t.Errorf("expected 0 requests after reset, got %d", snap3.TotalRequests)
 	}
+
+	// Allow any asynchronous persistence goroutines to finish before TempDir cleanup
+	time.Sleep(50 * time.Millisecond)
 }
 
