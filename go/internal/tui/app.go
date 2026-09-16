@@ -149,7 +149,8 @@ func RunTUI(cfgPath string, debug bool) error {
 
 	// Signal handling
 	sigChan := make(chan os.Signal, 2)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGWINCH)
+	signals := append([]os.Signal{os.Interrupt, syscall.SIGTERM}, resizeSignals...)
+	signal.Notify(sigChan, signals...)
 	defer signal.Stop(sigChan)
 
 	// Background input reader
@@ -192,7 +193,7 @@ func RunTUI(cfgPath string, debug bool) error {
 			go app.refreshQuota()
 
 		case sig := <-sigChan:
-			if sig == syscall.SIGWINCH {
+			if isResizeSignal(sig) {
 				app.ScheduleRender()
 			} else {
 				return nil
