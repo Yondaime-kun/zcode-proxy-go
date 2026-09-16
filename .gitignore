@@ -23,16 +23,18 @@ scripts/test_*.py
 scripts/test_*.ts
 scripts/aliyun_*.js
 
-# Executable binaries & archives
-zcode-proxy
-zcode-proxy.exe
-zcode-proxy-*
-zcode-captcha-solver
-zcode-captcha-solver-*
+# Executable binaries & archives (anchored to root)
+/zcode-proxy
+/zcode-proxy.exe
+/zcode-proxy-*
+/zcode-captcha-solver
+/zcode-captcha-solver-*
 *.tar.gz
 *.exe
-go/zcode-proxy
-go/zcode-proxy.exe
+/go/zcode-proxy
+/go/zcode-proxy.exe
+!go/cmd/
+!go/cmd/**
 .idea/
 
 # Android build artifacts
