@@ -3,13 +3,36 @@ node_modules/
 config.yaml
 .omo/evidence/
 dist/
+.cache/
+.browsers/
+.tmp/
 .DS_Store
 *.tsbuildinfo
 /.omo
 /_reverse
-/zcode-proxy.exe
-/zcode-proxy-linux-*
-/zcode-proxy-darwin-*
+# Research & test artifacts
+aliyun-captcha/
+scripts/screenshots/
+scripts/captchas/
+test_solve.ts
+scripts/auto_register.py
+scripts/inspect_page.py
+scripts/check_ratio.py
+scripts/solve_slider_cv.py
+scripts/test_*.py
+scripts/test_*.ts
+scripts/aliyun_*.js
+
+# Executable binaries & archives
+zcode-proxy
+zcode-proxy.exe
+zcode-proxy-*
+zcode-captcha-solver
+zcode-captcha-solver-*
+*.tar.gz
+*.exe
+go/zcode-proxy
+go/zcode-proxy.exe
 .idea/
 
 # Android build artifacts
