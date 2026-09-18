@@ -269,36 +269,53 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(respBody)
 			return
 		}
-	} else {
-		// In case respBody was nil from unexpected SSE, drain it
-		respBody, _ = io.ReadAll(resp.Body)
-		resp.Body.Close()
-	}
 
-	upBytes := respBody
-	var aResp translator.AnthropicMessagesResponse
-	if err := json.Unmarshal(upBytes, &aResp); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":{"type":"translation_failed","message":"%s"}}`, err.Error()), http.StatusBadGateway)
+		upBytes := respBody
+		var aResp translator.AnthropicMessagesResponse
+		if err := json.Unmarshal(upBytes, &aResp); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":{"type":"translation_failed","message":"%s"}}`, err.Error()), http.StatusBadGateway)
+			return
+		}
+
+		inTok = int64(aResp.Usage.InputTokens)
+		outTok = int64(aResp.Usage.OutputTokens)
+		if inTok == 0 && aResp.Usage.CacheReadInputTokens > 0 {
+			inTok = int64(aResp.Usage.CacheReadInputTokens)
+		}
+		if inTok == 0 && estInTok > 0 {
+			inTok = estInTok
+		}
+		statusCode = http.StatusOK
+
+		chatResp := translator.TranslateResponseAnthropicToOpenAI(&aResp)
+		responsesResp := translator.ChatToResponses(chatResp)
+		s.responsesStore.Save(*responsesResp)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(responsesResp)
 		return
 	}
 
-	inTok = int64(aResp.Usage.InputTokens)
-	outTok = int64(aResp.Usage.OutputTokens)
-	if inTok == 0 && aResp.Usage.CacheReadInputTokens > 0 {
-		inTok = int64(aResp.Usage.CacheReadInputTokens)
+	// Upstream responded with SSE stream
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, _ := w.(http.Flusher)
+	usage, streamErr := translator.StreamAnthropicToOpenAISSE(resp.Body, w, flusher, anthropicReq.Model)
+	if streamErr == nil {
+		statusCode = http.StatusOK
+	} else {
+		statusCode = http.StatusInternalServerError
 	}
+	inTok = int64(usage.InputTokens)
+	outTok = int64(usage.OutputTokens)
 	if inTok == 0 && estInTok > 0 {
 		inTok = estInTok
 	}
-	statusCode = http.StatusOK
-
-	chatResp := translator.TranslateResponseAnthropicToOpenAI(&aResp)
-	responsesResp := translator.ChatToResponses(chatResp)
-	s.responsesStore.Save(*responsesResp)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(responsesResp)
 }
 
 func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {

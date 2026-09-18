@@ -10,7 +10,8 @@ import (
 
 type ResponsesRequest struct {
 	Model              string                 `json:"model"`
-	Input              interface{}            `json:"input"` // string or []ResponsesInputItem
+	Input              interface{}            `json:"input,omitempty"` // string or []ResponsesInputItem
+	Messages           []OpenAIMessage        `json:"messages,omitempty"` // fallback if client sends Chat Completions format
 	Instructions       string                 `json:"instructions,omitempty"`
 	Tools              []OpenAIToolDefinition `json:"tools,omitempty"`
 	Stream             bool                   `json:"stream,omitempty"`
@@ -83,26 +84,30 @@ func ResponsesToChatCompletions(req *ResponsesRequest) *OpenAIChatRequest {
 		})
 	}
 
-	switch in := req.Input.(type) {
-	case string:
-		messages = append(messages, OpenAIMessage{
-			Role:    "user",
-			Content: in,
-		})
-	case []interface{}:
-		for _, item := range in {
-			if m, ok := item.(map[string]interface{}); ok {
-				role, _ := m["role"].(string)
-				if role == "" {
-					role = "user"
+	if req.Input != nil {
+		switch in := req.Input.(type) {
+		case string:
+			messages = append(messages, OpenAIMessage{
+				Role:    "user",
+				Content: in,
+			})
+		case []interface{}:
+			for _, item := range in {
+				if m, ok := item.(map[string]interface{}); ok {
+					role, _ := m["role"].(string)
+					if role == "" {
+						role = "user"
+					}
+					content := m["content"]
+					messages = append(messages, OpenAIMessage{
+						Role:    role,
+						Content: content,
+					})
 				}
-				content := m["content"]
-				messages = append(messages, OpenAIMessage{
-					Role:    role,
-					Content: content,
-				})
 			}
 		}
+	} else if len(req.Messages) > 0 {
+		messages = append(messages, req.Messages...)
 	}
 
 	return &OpenAIChatRequest{
