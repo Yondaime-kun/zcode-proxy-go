@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -85,11 +86,23 @@ func extractCaptchaToken(output []byte) *CaptchaToken {
 	return nil
 }
 
+var (
+	cachedBinaryMu   sync.RWMutex
+	cachedBinaryPath string
+)
+
 // SolveCaptchaOnDemand attempts to solve captcha if a solver command, binary, or script is available.
 func SolveCaptchaOnDemand(ctx context.Context, appVersion string) (*CaptchaToken, error) {
+	// Ensure ctx has a safety deadline (max 25 seconds) so a stuck child process never hangs forever
+	var cancel context.CancelFunc
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		ctx, cancel = context.WithTimeout(ctx, 25*time.Second)
+		defer cancel()
+	}
+
 	log.Printf("[captcha] solving captcha on-demand (app_version=%s)...", appVersion)
 
-	// 1. Check custom solver command from env
+	// 1. Check custom solver command from env (explicit user/test override takes top precedence)
 	if solverCmd := os.Getenv("ZCODE_CAPTCHA_SOLVER_CMD"); solverCmd != "" {
 		parts := strings.Fields(solverCmd)
 		cmd := exec.CommandContext(ctx, parts[0], append(parts[1:], appVersion)...)
@@ -102,20 +115,50 @@ func SolveCaptchaOnDemand(ctx context.Context, appVersion string) (*CaptchaToken
 		}
 	}
 
-	// 2. Check standalone zcode-captcha-solver binary (next to executable, in cwd, or PATH)
+	// 2. Fast path: try cached standalone binary path
+	cachedBinaryMu.RLock()
+	cachedPath := cachedBinaryPath
+	cachedBinaryMu.RUnlock()
+
+	if cachedPath != "" {
+		cmd := exec.CommandContext(ctx, cachedPath, appVersion)
+		out, err := cmd.Output()
+		if err == nil {
+			if tok := extractCaptchaToken(out); tok != nil {
+				log.Printf("[captcha] cached binary solver (%s) succeeded (len=%d, region=%s)", cachedPath, len(tok.VerifyParam), tok.Region)
+				return tok, nil
+			}
+		}
+		// Invalidate cache if binary failed or disappeared
+		cachedBinaryMu.Lock()
+		cachedBinaryPath = ""
+		cachedBinaryMu.Unlock()
+	}
+
+	// 3. Search standalone zcode-captcha-solver binary (next to executable, in cwd, or PATH)
 	var solverBinaries []string
 	if exe, err := os.Executable(); err == nil {
 		solverBinaries = append(solverBinaries, filepath.Join(filepath.Dir(exe), "zcode-captcha-solver"))
 	}
 	solverBinaries = append(solverBinaries, "./zcode-captcha-solver", "zcode-captcha-solver")
 
+	seenPaths := make(map[string]bool)
 	for _, binPath := range solverBinaries {
+		clean := filepath.Clean(binPath)
+		if seenPaths[clean] {
+			continue
+		}
+		seenPaths[clean] = true
+
 		if _, err := os.Stat(binPath); err == nil || binPath == "zcode-captcha-solver" {
 			cmd := exec.CommandContext(ctx, binPath, appVersion)
 			out, err := cmd.Output()
 			if err == nil {
 				if tok := extractCaptchaToken(out); tok != nil {
 					log.Printf("[captcha] binary solver (%s) succeeded (len=%d, region=%s)", binPath, len(tok.VerifyParam), tok.Region)
+					cachedBinaryMu.Lock()
+					cachedBinaryPath = binPath
+					cachedBinaryMu.Unlock()
 					return tok, nil
 				}
 			}

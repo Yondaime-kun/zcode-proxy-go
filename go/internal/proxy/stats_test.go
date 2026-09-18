@@ -129,10 +129,12 @@ func TestStatsPersistence(t *testing.T) {
 	done2 := st1.RecordRequestStart("glm-5.3-flash", "192.168.1.10")
 	done2(200, 200, 100)
 
-	// Explicit save to ensure file written
+	// Explicit save to ensure file written, and wait for async goroutines to settle
+	time.Sleep(30 * time.Millisecond)
 	if err := st1.Save(); err != nil {
 		t.Fatalf("failed to save stats: %v", err)
 	}
+	time.Sleep(30 * time.Millisecond)
 
 	// Create new tracker from same file
 	st2 := NewStatsTrackerWithPersistence(statsPath, nil)

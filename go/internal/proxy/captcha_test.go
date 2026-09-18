@@ -94,6 +94,7 @@ func TestExecuteWithCaptchaRetry(t *testing.T) {
 	}
 	pool := auth.NewAccountPool(store, auth.RoutingFailover)
 	handler := NewProxyHandlerWithPool(cfg, pool)
+	defer handler.Close()
 
 	headers := map[string]string{
 		"authorization": "Bearer test_jwt",

@@ -81,10 +81,11 @@ func extractTokensFromJSON(body []byte) (int64, int64) {
 }
 
 type ProxyHandler struct {
-	cfg        *config.Config
-	pool       *auth.AccountPool
-	httpClient *http.Client
-	stats      *StatsTracker
+	cfg         *config.Config
+	pool        *auth.AccountPool
+	httpClient  *http.Client
+	stats       *StatsTracker
+	captchaPool *CaptchaPool
 }
 
 func NewProxyHandler(cfg *config.Config, cred *auth.Credential) *ProxyHandler {
@@ -104,7 +105,7 @@ func NewProxyHandlerWithPool(cfg *config.Config, pool *auth.AccountPool) *ProxyH
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
 	}
-	return &ProxyHandler{
+	h := &ProxyHandler{
 		cfg:  cfg,
 		pool: pool,
 		httpClient: &http.Client{
@@ -112,6 +113,21 @@ func NewProxyHandlerWithPool(cfg *config.Config, pool *auth.AccountPool) *ProxyH
 			Timeout:   0, // Unlimited timeout for long LLM generation
 		},
 		stats: NewStatsTracker(nil),
+	}
+	if cfg.Plan == "start-plan" {
+		h.captchaPool = NewCaptchaPool(cfg.Identity.AppVersion)
+		h.captchaPool.Start()
+	}
+	return h
+}
+
+func (p *ProxyHandler) CaptchaPool() *CaptchaPool {
+	return p.captchaPool
+}
+
+func (p *ProxyHandler) Close() {
+	if p.captchaPool != nil {
+		p.captchaPool.Stop()
 	}
 }
 
@@ -160,7 +176,13 @@ func (p *ProxyHandler) BuildUpstreamHeaders(sessionID string, cred *auth.Credent
 		if cred != nil && cred.Jwt != "" {
 			headers["authorization"] = "Bearer " + cred.Jwt
 		}
-		tok, err := SolveCaptchaOnDemand(context.Background(), p.cfg.Identity.AppVersion)
+		var tok *CaptchaToken
+		var err error
+		if p.captchaPool != nil {
+			tok, err = p.captchaPool.TakeToken(context.Background())
+		} else {
+			tok, err = SolveCaptchaOnDemand(context.Background(), p.cfg.Identity.AppVersion)
+		}
 		if err == nil && tok != nil && tok.VerifyParam != "" {
 			log.Printf("[captcha] adding verify param to request (len=%d, region=%s)", len(tok.VerifyParam), tok.Region)
 			headers["x-aliyun-captcha-verify-param"] = tok.VerifyParam
@@ -245,7 +267,13 @@ func (p *ProxyHandler) ExecuteWithCaptchaRetry(
 				log.Printf("[captcha] upstream captcha challenge detected (status=%d, code=3007). Re-solving fresh token and retrying (attempt %d/%d)...",
 					resp.StatusCode, captchaAttempt+1, maxCaptchaRetries)
 
-				tok, solveErr := SolveCaptchaOnDemand(ctx, p.cfg.Identity.AppVersion)
+				var tok *CaptchaToken
+				var solveErr error
+				if p.captchaPool != nil {
+					tok, solveErr = p.captchaPool.TakeToken(ctx)
+				} else {
+					tok, solveErr = SolveCaptchaOnDemand(ctx, p.cfg.Identity.AppVersion)
+				}
 				if solveErr != nil || tok == nil || tok.VerifyParam == "" {
 					log.Printf("[captcha] failed to solve fresh captcha token: %v", solveErr)
 					return resp, respBody, nil
