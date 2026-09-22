@@ -115,7 +115,15 @@ func NewProxyHandlerWithPool(cfg *config.Config, pool *auth.AccountPool) *ProxyH
 		stats: NewStatsTracker(nil),
 	}
 	if cfg.Plan == "start-plan" {
-		h.captchaPool = NewCaptchaPool(cfg.Identity.AppVersion)
+		poolMin := cfg.Captcha.PoolMin
+		if poolMin <= 0 {
+			poolMin = 10
+		}
+		poolMax := cfg.Captcha.PoolMax
+		if poolMax < poolMin {
+			poolMax = 15
+		}
+		h.captchaPool = NewCaptchaPoolWithLimits(cfg.Identity.AppVersion, poolMin, poolMax)
 		h.captchaPool.Start()
 	}
 	return h
@@ -297,17 +305,61 @@ func (p *ProxyHandler) ExecuteWithCaptchaRetry(
 }
 
 func isQuotaExceeded(statusCode int, body []byte) bool {
+	if len(body) > 0 {
+		var raw map[string]interface{}
+		if json.Unmarshal(body, &raw) == nil {
+			if c, ok := raw["code"].(float64); ok {
+				code := int(c)
+				if code == 1605 || code == 3103 || code == 1005 {
+					return true
+				}
+				if code == 3009 || code == 1302 || code == 1303 || code == 1305 {
+					return false
+				}
+			}
+			if msg, ok := raw["msg"].(string); ok {
+				msgLower := strings.ToLower(msg)
+				if strings.Contains(msgLower, "concurrency") || strings.Contains(msgLower, "rate limit") || strings.Contains(msg, "并发") {
+					return false
+				}
+				if strings.Contains(msgLower, "quota") ||
+					strings.Contains(msg, "配额") ||
+					strings.Contains(msgLower, "balance") ||
+					strings.Contains(msg, "余额不足") ||
+					strings.Contains(msgLower, "arrears") ||
+					strings.Contains(msg, "欠费") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isRateLimited(statusCode int, body []byte) bool {
+	if isQuotaExceeded(statusCode, body) {
+		return false
+	}
 	if statusCode == http.StatusTooManyRequests {
 		return true
 	}
 	if len(body) > 0 {
 		var raw map[string]interface{}
 		if json.Unmarshal(body, &raw) == nil {
-			if c, ok := raw["code"].(float64); ok && int(c) == 1605 {
-				return true
+			if c, ok := raw["code"].(float64); ok {
+				code := int(c)
+				if code == 3009 || code == 1302 || code == 1303 || code == 1305 {
+					return true
+				}
 			}
-			if msg, ok := raw["msg"].(string); ok && (strings.Contains(msg, "quota") || strings.Contains(msg, "配额")) {
-				return true
+			if msg, ok := raw["msg"].(string); ok {
+				msgLower := strings.ToLower(msg)
+				if strings.Contains(msgLower, "concurrency") ||
+					strings.Contains(msgLower, "rate limit") ||
+					strings.Contains(msgLower, "too many") ||
+					strings.Contains(msg, "并发") {
+					return true
+				}
 			}
 		}
 	}
@@ -388,9 +440,29 @@ func (p *ProxyHandler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 		if respBody != nil {
 			if isQuotaExceeded(resp.StatusCode, respBody) {
-				log.Printf("[proxy] account %q exceeded quota limit (code 1605 or 429). Failing over to next account...", acc.Name)
+				log.Printf("[proxy] account %q exceeded quota limit (status=%d, body=%s). Marking exhausted and failing over...", acc.Name, resp.StatusCode, string(respBody))
 				p.pool.MarkExhausted(acc.Name, auth.DefaultExhaustedCooldown)
 				continue
+			}
+
+			if isRateLimited(resp.StatusCode, respBody) {
+				if p.pool.AvailableCount() > 1 && attempt < maxAttempts-1 {
+					log.Printf("[proxy] account %q rate limited (status=%d). Failing over to next account...", acc.Name, resp.StatusCode)
+					p.pool.MarkExhausted(acc.Name, 5*time.Second)
+					continue
+				}
+				if attempt == 0 && r.Context().Err() == nil {
+					log.Printf("[proxy] account %q rate limited (status=%d). Retrying in 1s...", acc.Name, resp.StatusCode)
+					select {
+					case <-r.Context().Done():
+					case <-time.After(1 * time.Second):
+						retryResp, retryBody, retryErr := p.ExecuteWithCaptchaRetry(r.Context(), upstreamURL, headers, transformedBody)
+						if retryErr == nil && retryResp != nil && !isRateLimited(retryResp.StatusCode, retryBody) && !isQuotaExceeded(retryResp.StatusCode, retryBody) {
+							resp = retryResp
+							respBody = retryBody
+						}
+					}
+				}
 			}
 
 			if p.cfg.Plan == "start-plan" && IsCaptchaChallenged(resp.StatusCode, resp.Header, respBody) {
@@ -578,6 +650,26 @@ func (p *ProxyHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Requ
 				log.Printf("[proxy] account %q exceeded quota limit (status=%d, body=%s). Marking exhausted and failing over...", acc.Name, resp.StatusCode, string(respBody))
 				p.pool.MarkExhausted(acc.Name, auth.DefaultExhaustedCooldown)
 				continue // retry with next account!
+			}
+
+			if isRateLimited(resp.StatusCode, respBody) {
+				if p.pool.AvailableCount() > 1 && attempt < maxAttempts-1 {
+					log.Printf("[proxy] account %q rate limited (status=%d). Failing over to next account...", acc.Name, resp.StatusCode)
+					p.pool.MarkExhausted(acc.Name, 5*time.Second)
+					continue
+				}
+				if attempt == 0 && r.Context().Err() == nil {
+					log.Printf("[proxy] account %q rate limited (status=%d). Retrying in 1s...", acc.Name, resp.StatusCode)
+					select {
+					case <-r.Context().Done():
+					case <-time.After(1 * time.Second):
+						retryResp, retryBody, retryErr := p.ExecuteWithCaptchaRetry(r.Context(), upstreamURL, headers, transformedBody)
+						if retryErr == nil && retryResp != nil && !isRateLimited(retryResp.StatusCode, retryBody) && !isQuotaExceeded(retryResp.StatusCode, retryBody) {
+							resp = retryResp
+							respBody = retryBody
+						}
+					}
+				}
 			}
 
 			if p.cfg.Plan == "start-plan" && IsCaptchaChallenged(resp.StatusCode, resp.Header, respBody) {

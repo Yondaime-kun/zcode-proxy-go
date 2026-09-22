@@ -59,6 +59,8 @@ type ClaimConfig struct {
 
 type CaptchaSettings struct {
 	MaxRetries int `yaml:"maxRetries"`
+	PoolMin    int `yaml:"poolMin"`
+	PoolMax    int `yaml:"poolMax"`
 }
 
 type SecurityConfig struct {
@@ -102,6 +104,8 @@ func DefaultConfig() *Config {
 		Routing:  "failover",
 		Captcha: CaptchaSettings{
 			MaxRetries: 3,
+			PoolMin:    10,
+			PoolMax:    15,
 		},
 		Providers: map[string]ProviderUrls{
 			"zai": {

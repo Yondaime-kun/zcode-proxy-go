@@ -33,13 +33,23 @@ type CaptchaPool struct {
 }
 
 func NewCaptchaPool(appVersion string) *CaptchaPool {
-	minSize := 2
+	return NewCaptchaPoolWithLimits(appVersion, 10, 15)
+}
+
+func NewCaptchaPoolWithLimits(appVersion string, defaultMin, defaultMax int) *CaptchaPool {
+	if defaultMin <= 0 {
+		defaultMin = 10
+	}
+	if defaultMax < defaultMin {
+		defaultMax = 15
+	}
+	minSize := defaultMin
 	if v := os.Getenv("CAPTCHA_POOL_MIN"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
 			minSize = n
 		}
 	}
-	maxSize := 5
+	maxSize := defaultMax
 	if v := os.Getenv("CAPTCHA_POOL_MAX"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= minSize {
 			maxSize = n
