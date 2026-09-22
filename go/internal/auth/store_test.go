@@ -41,3 +41,31 @@ func TestSaveAndLoadCredential(t *testing.T) {
 		t.Errorf("CredentialString mismatch: %s", cred.CredentialString())
 	}
 }
+
+func TestStoreDirOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(EnvStoreDir, tempDir)
+
+	expected := tempDir + "/credentials.json"
+	if got := GetStorePath(); got != expected {
+		t.Errorf("GetStorePath() = %q, want %q", got, expected)
+	}
+
+	cred := &Credential{
+		ApiKey:   "override-key",
+		Secret:   "override-secret",
+		Provider: "zai",
+	}
+
+	if err := SaveCredential(cred); err != nil {
+		t.Fatalf("SaveCredential failed: %v", err)
+	}
+
+	loaded, err := LoadCredential()
+	if err != nil {
+		t.Fatalf("LoadCredential failed: %v", err)
+	}
+	if loaded == nil || loaded.ApiKey != "override-key" {
+		t.Fatalf("unexpected loaded credential: %+v", loaded)
+	}
+}

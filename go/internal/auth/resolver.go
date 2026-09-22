@@ -344,6 +344,9 @@ func (r *KeyResolver) ResolveCodingPlanCredential(accessToken, provider, userID 
 	if err != nil {
 		return nil, err
 	}
+	if provider == "zai" && strings.TrimSpace(secret) == "" {
+		return nil, fmt.Errorf("zai API key copy response is missing secretKey")
+	}
 
 	return &Credential{
 		ApiKey:   apiKey,

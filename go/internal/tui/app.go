@@ -28,7 +28,7 @@ const (
 	pageScrollSize = 10
 )
 
-var version = "4.6.5-go"
+var version = "4.6.8-go"
 
 type App struct {
 	cfgPath         string
@@ -385,7 +385,7 @@ func (a *App) claimNow() {
 			a.mu.Unlock()
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
 		client := claim.NewClient(cfg.Claim.Origin, jwt, cfg)
@@ -413,7 +413,12 @@ func (a *App) claimNow() {
 		}
 
 		log.Printf("[claim] %s found active plan: %s (%s, priority %d). Claiming...", tag, target.PlanID, target.Name, target.Priority)
-		token, _ := proxy.SolveCaptchaOnDemand(ctx, cfg.Identity.AppVersion)
+		token, err := proxy.SolveCaptchaOnDemand(ctx, cfg.Identity.AppVersion)
+		if err != nil || token == nil || token.VerifyParam == "" {
+			log.Printf("[claim] %s captcha required for claim but solver failed: %v", tag, err)
+			a.setToast(fmt.Sprintf("%s claim failed: captcha solver failed", tag), "warn")
+			return
+		}
 		outcome, err := client.Claim(ctx, target.PlanID, token.VerifyParam, token.Region)
 		if err != nil {
 			log.Printf("[claim] %s claim request failed: %v", tag, err)

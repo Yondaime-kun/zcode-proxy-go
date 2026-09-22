@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 )
 
-func TransformAnthropicBody(body []byte, metadataUserId string, startPlan bool, model string) []byte {
+func TransformAnthropicBody(body []byte, metadataUserId string, startPlan bool, model string, provider string) []byte {
 	var root map[string]interface{}
 	if err := json.Unmarshal(body, &root); err != nil {
 		return body
@@ -15,7 +15,7 @@ func TransformAnthropicBody(body []byte, metadataUserId string, startPlan bool, 
 	// Start-plan system prompt injection
 	if startPlan {
 		existingSystem := root["system"]
-		root["system"] = BuildStartPlanSystem(model, existingSystem)
+		root["system"] = BuildStartPlanSystem(model, existingSystem, provider)
 		if msgs, ok := root["messages"].([]interface{}); ok && len(msgs) > 0 {
 			root["messages"] = append([]interface{}{BuildContextPrefixMessage()}, msgs...)
 		}

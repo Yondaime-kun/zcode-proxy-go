@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -32,6 +33,16 @@ func NewClient(origin, jwt string, cfg *config.Config) *Client {
 	}
 }
 
+func (c *Client) getDeviceMid() string {
+	if mid := os.Getenv("ZCODE_IDENTITY_DEVICE_MID"); strings.TrimSpace(mid) != "" {
+		return strings.TrimSpace(mid)
+	}
+	if c.cfg != nil && strings.TrimSpace(c.cfg.Identity.DeviceMid) != "" {
+		return strings.TrimSpace(c.cfg.Identity.DeviceMid)
+	}
+	return ""
+}
+
 func claimPlatform() string {
 	switch runtime.GOOS {
 	case "windows":
@@ -47,9 +58,9 @@ func claimPlatform() string {
 }
 
 func (c *Client) GetPreviews(ctx context.Context) ([]ClaimablePlan, error) {
-	appVer := c.cfg.Identity.AppVersion
-	if appVer == "" {
-		appVer = "3.11.2"
+	appVer := "3.14.0"
+	if c.cfg != nil && c.cfg.Identity.AppVersion != "" {
+		appVer = c.cfg.Identity.AppVersion
 	}
 	platform := claimPlatform()
 
@@ -61,14 +72,13 @@ func (c *Client) GetPreviews(ctx context.Context) ([]ClaimablePlan, error) {
 		return nil, err
 	}
 
-	headers := proxy.BuildControlIdentityHeaders(c.cfg)
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	req.Header.Set("Accept", "application/json")
 	if c.jwt != "" {
 		req.Header.Set("Authorization", "Bearer "+c.jwt)
 	}
+	if mid := c.getDeviceMid(); mid != "" {
+		req.Header.Set("X-Device-Mid", mid)
+	}
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -118,6 +128,12 @@ func (c *Client) Claim(ctx context.Context, planID string, captchaVerifyParam st
 		}, nil
 	}
 
+	appVer := "3.14.0"
+	if c.cfg != nil && c.cfg.Identity.AppVersion != "" {
+		appVer = c.cfg.Identity.AppVersion
+	}
+	platform := claimPlatform()
+
 	endpoint := fmt.Sprintf("%s/api/v1/zcode-plan/billing/claim", c.origin)
 	payload, _ := json.Marshal(map[string]string{"plan_id": planID})
 
@@ -126,20 +142,20 @@ func (c *Client) Claim(ctx context.Context, planID string, captchaVerifyParam st
 		return nil, err
 	}
 
-	headers := proxy.BuildControlIdentityHeaders(c.cfg)
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.jwt)
-
+	req.Header.Set("Content-Type", "application/json")
 	if captchaVerifyParam != "" {
 		req.Header.Set("X-Aliyun-Captcha-Verify-Param", captchaVerifyParam)
 	}
 	if captchaRegion != "" {
 		req.Header.Set("X-Aliyun-Captcha-Verify-Region", captchaRegion)
 	}
+	req.Header.Set("X-ZCode-App-Version", appVer)
+	req.Header.Set("X-Platform", platform)
+	if mid := c.getDeviceMid(); mid != "" {
+		req.Header.Set("X-Device-Mid", mid)
+	}
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -207,9 +223,9 @@ type BalanceBucket struct {
 }
 
 func (c *Client) GetBalances(ctx context.Context) ([]BalanceBucket, error) {
-	appVer := c.cfg.Identity.AppVersion
-	if appVer == "" {
-		appVer = "3.11.2"
+	appVer := "3.14.0"
+	if c.cfg != nil && c.cfg.Identity.AppVersion != "" {
+		appVer = c.cfg.Identity.AppVersion
 	}
 	platform := claimPlatform()
 	endpoint := fmt.Sprintf("%s/api/v1/zcode-plan/billing/balance?app_version=%s&platform=%s",

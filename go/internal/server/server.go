@@ -242,18 +242,23 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	traceHeaders := proxy.BuildTraceHeaders(s.cfg.Plan)
-	sessionID := traceHeaders["x-session-id"]
-	metaUserID := proxy.BuildAnthropicMetadataUserId(s.cfg.Identity.DeviceMid, sessionID)
-	isStartPlan := s.cfg.Plan == "start-plan"
-	transformedBody := proxy.TransformAnthropicBody(anthropicBody, metaUserID, isStartPlan, anthropicReq.Model)
-
-	upstreamURL := s.proxyHandler.GetUpstreamURL()
 	acc := s.pool.GetNextAvailable()
 	if acc == nil || acc.Credential == nil {
 		http.Error(w, `{"error":{"type":"auth_error","message":"no available account in pool"}}`, http.StatusUnauthorized)
 		return
 	}
+
+	traceHeaders := proxy.BuildTraceHeaders(s.cfg.Plan)
+	sessionID := traceHeaders["x-session-id"]
+	metaUserID := proxy.BuildAnthropicMetadataUserId(s.cfg.Identity.DeviceMid, sessionID)
+	isStartPlan := s.cfg.Plan == "start-plan"
+	provider := s.cfg.Provider
+	if acc.Credential != nil && acc.Credential.Provider != "" {
+		provider = acc.Credential.Provider
+	}
+	transformedBody := proxy.TransformAnthropicBody(anthropicBody, metaUserID, isStartPlan, anthropicReq.Model, provider)
+
+	upstreamURL := s.proxyHandler.GetUpstreamURL()
 
 	headers := s.proxyHandler.BuildUpstreamHeaders(sessionID, acc.Credential)
 	resp, respBody, err := s.proxyHandler.ExecuteWithCaptchaRetry(r.Context(), upstreamURL, headers, transformedBody)

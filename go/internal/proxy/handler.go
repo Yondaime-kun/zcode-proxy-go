@@ -370,7 +370,11 @@ func (p *ProxyHandler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		sessionID := randomHex(16)
 		metaUserID := BuildAnthropicMetadataUserId(p.cfg.Identity.DeviceMid, sessionID)
 		isStartPlan := p.cfg.Plan == "start-plan"
-		transformedBody := TransformAnthropicBody(body, metaUserID, isStartPlan, meta.Model)
+		provider := p.cfg.Provider
+		if acc.Credential != nil && acc.Credential.Provider != "" {
+			provider = acc.Credential.Provider
+		}
+		transformedBody := TransformAnthropicBody(body, metaUserID, isStartPlan, meta.Model, provider)
 
 		upstreamURL := p.GetUpstreamURL()
 		headers := p.BuildUpstreamHeaders(sessionID, acc.Credential)
@@ -553,7 +557,11 @@ func (p *ProxyHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Requ
 		sessionID := randomHex(16)
 		metaUserID := BuildAnthropicMetadataUserId(p.cfg.Identity.DeviceMid, sessionID)
 		isStartPlan := p.cfg.Plan == "start-plan"
-		transformedBody := TransformAnthropicBody(anthropicBody, metaUserID, isStartPlan, anthropicReq.Model)
+		provider := p.cfg.Provider
+		if acc.Credential != nil && acc.Credential.Provider != "" {
+			provider = acc.Credential.Provider
+		}
+		transformedBody := TransformAnthropicBody(anthropicBody, metaUserID, isStartPlan, anthropicReq.Model, provider)
 
 		upstreamURL := p.GetUpstreamURL()
 		headers := p.BuildUpstreamHeaders(sessionID, acc.Credential)

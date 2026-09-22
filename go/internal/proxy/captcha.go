@@ -93,10 +93,10 @@ var (
 
 // SolveCaptchaOnDemand attempts to solve captcha if a solver command, binary, or script is available.
 func SolveCaptchaOnDemand(ctx context.Context, appVersion string) (*CaptchaToken, error) {
-	// Ensure ctx has a safety deadline (max 25 seconds) so a stuck child process never hangs forever
+	// Ensure ctx has a safety deadline (max 60 seconds) so a stuck child process never hangs forever
 	var cancel context.CancelFunc
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		ctx, cancel = context.WithTimeout(ctx, 25*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 	}
 

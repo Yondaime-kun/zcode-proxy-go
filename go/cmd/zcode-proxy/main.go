@@ -24,7 +24,7 @@ import (
 	"github.com/yondaime-kun/zcode-proxy-go/internal/tui"
 )
 
-var Version = "4.6.5-go"
+var Version = "4.6.8-go"
 
 func main() {
 	args := os.Args[1:]
@@ -439,7 +439,7 @@ func runClaim(args []string) {
 		}
 
 		fmt.Printf("\n=== Checking claims for account [%s] ===\n", name)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		client := claim.NewClient(cfg.Claim.Origin, cred.Jwt, cfg)
 		plans, err := client.GetPreviews(ctx)
 		if err != nil {
@@ -473,7 +473,12 @@ func runClaim(args []string) {
 		}
 		fmt.Printf("[%s] Claiming target plan: %s...\n", name, target.PlanID)
 
-		token, _ := proxy.SolveCaptchaOnDemand(ctx, cfg.Identity.AppVersion)
+		token, err := proxy.SolveCaptchaOnDemand(ctx, cfg.Identity.AppVersion)
+		if err != nil || token == nil || token.VerifyParam == "" {
+			fmt.Printf("Claim failed for [%s]: captcha solver failed: %v\n", name, err)
+			cancel()
+			continue
+		}
 		outcome, err := client.Claim(ctx, target.PlanID, token.VerifyParam, token.Region)
 		cancel()
 

@@ -128,7 +128,7 @@ func DefaultConfig() *Config {
 			"glm-5.3-flash",
 		},
 		Identity: IdentityConfig{
-			AppVersion:    "3.11.2",
+			AppVersion:    "3.14.0",
 			SourceTitle:   "cli",
 			RefererOrigin: "https://zcode.z.ai",
 			DeviceMid:     "",

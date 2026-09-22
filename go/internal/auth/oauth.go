@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,13 +20,16 @@ import (
 )
 
 func saveAuthUrl(url string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
+	dir := ""
+	if d := strings.TrimSpace(os.Getenv(EnvStoreDir)); d != "" {
+		dir = d
+	} else if home, err := os.UserHomeDir(); err == nil {
+		dir = filepath.Join(home, ".zcode-proxy")
 	}
-	dir := filepath.Join(home, ".zcode-proxy")
-	_ = os.MkdirAll(dir, 0700)
-	_ = os.WriteFile(filepath.Join(dir, "auth_url.txt"), []byte(url+"\n"), 0600)
+	if dir != "" {
+		_ = os.MkdirAll(dir, 0700)
+		_ = os.WriteFile(filepath.Join(dir, "auth_url.txt"), []byte(url+"\n"), 0600)
+	}
 }
 
 type OAuthResult struct {
@@ -59,12 +63,34 @@ func openBrowser(url string) {
 	_ = exec.Command(cmd, args...).Start()
 }
 
-// ZaiOAuth implements server-mediated polling login
-func LoginZai(ctx context.Context) (*OAuthResult, error) {
+func BuildDesktopOAuthRedirectParam(appVersion string) string {
+	if appVersion == "" {
+		appVersion = "3.14.0"
+	}
+	return fmt.Sprintf("https://zcode.z.ai/app/oauth/login?redirect=zcode%%3A%%2F%%2Foauth%%2Fcallback&app_version=%s", url.QueryEscape(appVersion))
+}
+
+func applyInterstitial(rawUrl string, provider string, appVersion string) string {
+	u, err := url.Parse(rawUrl)
+	if err != nil {
+		return rawUrl
+	}
+	q := u.Query()
+	paramName := "redirect_uri"
+	if provider == "bigmodel" {
+		paramName = "redirect"
+	}
+	q.Set(paramName, BuildDesktopOAuthRedirectParam(appVersion))
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// LoginPoll implements server-mediated polling login for both zai and bigmodel (3.12.3+ desktop default)
+func LoginPoll(ctx context.Context, provider string) (*OAuthResult, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	pollToken := randomHex(32)
 
-	initPayload, _ := json.Marshal(map[string]string{"provider": "zai"})
+	initPayload, _ := json.Marshal(map[string]string{"provider": provider})
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://zcode.z.ai/api/v1/oauth/cli/init", bytes.NewReader(initPayload))
 	if err != nil {
 		return nil, err
@@ -74,7 +100,7 @@ func LoginZai(ctx context.Context) (*OAuthResult, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to init zai oauth: %w", err)
+		return nil, fmt.Errorf("failed to init %s oauth: %w", provider, err)
 	}
 	defer resp.Body.Close()
 
@@ -95,11 +121,11 @@ func LoginZai(ctx context.Context) (*OAuthResult, error) {
 		return nil, fmt.Errorf("init failed: %s", initResp.Msg)
 	}
 
-	authUrl := initResp.Data.AuthorizeUrl
+	authUrl := applyInterstitial(initResp.Data.AuthorizeUrl, provider, "3.14.0")
 	saveAuthUrl(authUrl)
-	log.Printf("[auth] open URL in browser to authorize:")
+	log.Printf("[auth] open URL in browser to authorize (%s):", provider)
 	log.Printf("%s", authUrl)
-	fmt.Println("Please open this URL in your browser to authorize:")
+	fmt.Printf("Please open this URL in your browser to authorize (%s):\n", provider)
 	fmt.Printf("\n  %s\n\n", authUrl)
 	fmt.Println("Waiting for authorization... (expires in 300s)")
 	openBrowser(authUrl)
@@ -142,6 +168,9 @@ func LoginZai(ctx context.Context) (*OAuthResult, error) {
 				Zai struct {
 					AccessToken string `json:"access_token"`
 				} `json:"zai"`
+				Bigmodel struct {
+					AccessToken string `json:"access_token"`
+				} `json:"bigmodel"`
 			} `json:"data"`
 			Msg string `json:"msg"`
 		}
@@ -149,13 +178,18 @@ func LoginZai(ctx context.Context) (*OAuthResult, error) {
 		pollResp.Body.Close()
 
 		if pollResult.Data.Status == "ready" {
-			accessToken := strings.TrimSpace(pollResult.Data.Zai.AccessToken)
+			accessToken := ""
+			if provider == "bigmodel" {
+				accessToken = strings.TrimSpace(pollResult.Data.Bigmodel.AccessToken)
+			} else {
+				accessToken = strings.TrimSpace(pollResult.Data.Zai.AccessToken)
+			}
 			if accessToken == "" {
-				return nil, fmt.Errorf("zai login poll response missing access_token")
+				return nil, fmt.Errorf("%s login poll response missing access_token", provider)
 			}
 			return &OAuthResult{
 				AccessToken: accessToken,
-				Provider:    "zai",
+				Provider:    provider,
 				UserId:      pollResult.Data.User.UserId,
 				Jwt:         strings.TrimSpace(pollResult.Data.Token),
 			}, nil
@@ -168,8 +202,16 @@ func LoginZai(ctx context.Context) (*OAuthResult, error) {
 	return nil, fmt.Errorf("login timed out")
 }
 
-// BigmodelOAuth implements auth-code flow with local loopback listener
+func LoginZai(ctx context.Context) (*OAuthResult, error) {
+	return LoginPoll(ctx, "zai")
+}
+
 func LoginBigmodel(ctx context.Context) (*OAuthResult, error) {
+	return LoginPoll(ctx, "bigmodel")
+}
+
+// LoginBigmodelAuthCode implements the classic auth-code flow with local loopback listener (paste/localhost fallback)
+func LoginBigmodelAuthCode(ctx context.Context) (*OAuthResult, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("failed to bind local callback port: %w", err)

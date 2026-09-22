@@ -58,7 +58,12 @@ type CacheControl struct {
 	Type string `json:"type"`
 }
 
-func BuildEnvironmentSection(model string) string {
+var ProviderModelIDs = map[string]string{
+	"zai":      "zai-api",
+	"bigmodel": "bigmodel-api",
+}
+
+func BuildEnvironmentSection(model string, provider string) string {
 	e := sysData.Environment
 	cwd, err := os.Getwd()
 	if err != nil || cwd == "" {
@@ -99,17 +104,29 @@ func BuildEnvironmentSection(model string) string {
 		fmt.Sprintf("- %s: %s", e.ShellLabel, shell),
 		fmt.Sprintf("- %s: %s", e.OsVersionLabel, osVersion),
 	}
-	if model != "" {
-		lines = append(lines, strings.ReplaceAll(e.PoweredByLine, "{model}", model))
+	modelID := strings.TrimSpace(model)
+	prov := strings.TrimSpace(provider)
+	if modelID != "" && prov != "" {
+		mappedProv, ok := ProviderModelIDs[prov]
+		if !ok {
+			if strings.HasSuffix(prov, "-api") {
+				mappedProv = prov
+			} else {
+				mappedProv = prov + "-api"
+			}
+		}
+		line := strings.ReplaceAll(e.PoweredByLine, "{provider}", mappedProv)
+		line = strings.ReplaceAll(line, "{model}", modelID)
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func BuildStartPlanSystem(model string, existingSystem interface{}) []StartPlanSystemBlock {
+func BuildStartPlanSystem(model string, existingSystem interface{}, provider string) []StartPlanSystemBlock {
 	stable := strings.Join(sysData.StableSections, "\n\n")
 	dynamic := strings.Join([]string{
 		sysData.DynamicSections.BeforeEnvironment,
-		BuildEnvironmentSection(model),
+		BuildEnvironmentSection(model, provider),
 		sysData.DynamicSections.AfterEnvironment,
 	}, "\n\n")
 

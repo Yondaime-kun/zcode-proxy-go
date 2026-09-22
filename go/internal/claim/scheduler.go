@@ -88,7 +88,7 @@ func (s *Scheduler) tick() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	client := NewClient(s.cfg.Claim.Origin, jwt, s.cfg)
@@ -124,7 +124,12 @@ func (s *Scheduler) tick() {
 	tag := s.AccountTag()
 	log.Printf("[claim] %s Found active plan: %s (%s, priority %d)", tag, target.PlanID, target.Name, target.Priority)
 
-	token, _ := proxy.SolveCaptchaOnDemand(ctx, s.cfg.Identity.AppVersion)
+	token, err := proxy.SolveCaptchaOnDemand(ctx, s.cfg.Identity.AppVersion)
+	if err != nil || token == nil || token.VerifyParam == "" {
+		log.Printf("[claim] %s Captcha required for claim but solver failed: %v", tag, err)
+		s.holdUntil = time.Now().Add(time.Duration(s.cfg.Claim.CooldownMs) * time.Millisecond)
+		return
+	}
 	outcome, err := client.Claim(ctx, target.PlanID, token.VerifyParam, token.Region)
 	if err != nil {
 		log.Printf("[claim] %s Claim request failed: %v", tag, err)

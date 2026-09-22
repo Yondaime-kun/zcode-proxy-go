@@ -105,7 +105,7 @@ func resolveTimezone() string {
 func BuildLlmIdentityHeaders(cfg *config.Config) map[string]string {
 	appVer := cfg.Identity.AppVersion
 	if appVer == "" {
-		appVer = "3.11.2"
+		appVer = "3.14.0"
 	}
 	platform := resolvePlatform()
 	arch := resolveArch()
@@ -127,10 +127,10 @@ func BuildLlmIdentityHeaders(cfg *config.Config) map[string]string {
 		"X-Release-Channel":   "production",
 		"X-Client-Language":   resolveLanguage(),
 		"X-Client-Timezone":   resolveTimezone(),
+		"X-ZCode-Agent":       "glm",
 		"X-Platform":          fmt.Sprintf("%s-%s", platform, arch),
 		"X-Os-Category":       normalizeOsCategory(platform),
 		"X-Os-Version":        release,
-		"X-ZCode-Agent":       "glm",
 	}
 
 	return headers
@@ -139,7 +139,7 @@ func BuildLlmIdentityHeaders(cfg *config.Config) map[string]string {
 func BuildControlIdentityHeaders(cfg *config.Config) map[string]string {
 	appVer := cfg.Identity.AppVersion
 	if appVer == "" {
-		appVer = "3.11.2"
+		appVer = "3.14.0"
 	}
 	platform := resolvePlatform()
 	arch := resolveArch()
@@ -154,12 +154,14 @@ func BuildControlIdentityHeaders(cfg *config.Config) map[string]string {
 	}
 
 	headers := map[string]string{
-		"HTTP-Referer":        referer,
 		"User-Agent":          fmt.Sprintf("ZCode/%s", appVer),
-		"X-ZCode-App-Version": appVer,
+		"HTTP-Referer":        referer,
 		"X-Title":             fmt.Sprintf("Z Code@%s", sourceTitle),
-		"X-Release-Channel":   "production",
+		"X-ZCode-App-Version": appVer,
 		"X-Platform":          fmt.Sprintf("%s-%s", platform, arch),
+		"X-Release-Channel":   "production",
+		"X-Client-Language":   resolveLanguage(),
+		"X-Client-Timezone":   resolveTimezone(),
 		"X-Os-Category":       normalizeOsCategory(platform),
 		"X-Os-Version":        release,
 	}

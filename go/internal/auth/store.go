@@ -16,9 +16,15 @@ import (
 	"strings"
 )
 
-const EnvSecret = "ZCODE_PROXY_CREDENTIAL_SECRET"
+const (
+	EnvSecret   = "ZCODE_PROXY_CREDENTIAL_SECRET"
+	EnvStoreDir = "ZCODE_PROXY_STORE_DIR"
+)
 
 func GetStorePath() string {
+	if dir := strings.TrimSpace(os.Getenv(EnvStoreDir)); dir != "" {
+		return filepath.Join(dir, "credentials.json")
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".zcode-proxy", "credentials.json")
 }
